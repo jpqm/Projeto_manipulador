@@ -20,7 +20,7 @@ def main():
     serial_drv.send("F800")
     controller.recuperar_do_log()
     serial_drv.reset_log()
-    serial_drv.send("M97 B60 T0.2")
+    serial_drv.send("M97 B40 T0.2")
 
     # 3. Inicia o ambiente PyQt
     app = QApplication(sys.argv)

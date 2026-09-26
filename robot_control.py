@@ -8,7 +8,6 @@ import numpy as np
 import bezier as bz
 import ik_craig as ik
 from config import GCODE_LOG
-from calculo_erro import CalcErro
 
 import semi_circ as sc
 
@@ -17,7 +16,6 @@ class RobotController:
         """Guarda as referências de comunicação e o estado inicial de posição e orientação do robô."""
         self.serial = serial_driver
         self.unity = unity_client
-        self.calc_erro = CalcErro()  # Instância da classe CalcErro
         
         # Estado inicial do manipulador
         self.P0 = np.array([403.3643, 0, 570.3432])
@@ -35,32 +33,13 @@ class RobotController:
                 np.round(np.linspace(B0, Bf, n), 2),
                 np.round(np.linspace(C0, Cf, n), 2))
 
-    def executar_movimento(self, x, y, z, A, B, C, feedrate=1000, nome_trajetoria=None):
-        """Calcula os ângulos das juntas para cada ponto, avalia o erro da cinemática
-        usando os próprios ângulos obtidos, envia ao GRBL (G1) e espelha no Unity."""
-        
-        # 1. Calcula os ângulos das juntas através da cinemática inversa
+    def executar_movimento(self, x, y, z, A, B, C, feedrate=1000):
+        """Calcula os ângulos das juntas para cada ponto, envia ao GRBL (G1) e espelha no Unity."""
         angulos = []
         for i in range(len(x)):
             theta1, theta2, theta3 = ik.calculo_angulos(x[i], y[i], z[i])
             angulos.append([theta1, theta2, theta3, A[i], -C[i], B[i]])
 
-        angulos = np.array(angulos)
-
-        # 2. Avalia o erro da trajetória usando os ângulos já computados (sem recalcular IK)
-        relatorio_erro = self.calc_erro.calcular_erro_trajetoria(x, y, z, angulos, nome_trajetoria=nome_trajetoria)
-        nome = relatorio_erro['nome']
-        pf_des = relatorio_erro['pos_final_desejada']
-        pf_calc = relatorio_erro['pos_final_calculada']
-        print(
-            f"[ERRO CINEMÁTICA - {nome}] Erro Médio: {relatorio_erro['erro_medio']:.4f} mm | "
-            f"Erro Máximo: {relatorio_erro['erro_max']:.4f} mm | "
-            f"Erro Final: {relatorio_erro['erro_final']:.4f} mm | "
-            f"Pos Desejada: [{pf_des[0]:.2f}, {pf_des[1]:.2f}, {pf_des[2]:.2f}] | "
-            f"Pos Calculada: [{pf_calc[0]:.2f}, {pf_calc[1]:.2f}, {pf_calc[2]:.2f}]"
-        )
-
-        # 3. Envia os movimentos para o Unity e Arduino
         for i in range(len(angulos)):
             theta1, theta2, theta3, A_grbl, B_grbl, C_grbl = angulos[i]
             self.unity.send_angles(theta1, theta2, -theta3, -A[i], B[i], -C[i], feedrate)
@@ -91,6 +70,12 @@ class RobotController:
 
         print(f"[TRAJETÓRIA] Tempo estimado: {tempo_s:.1f} s")
         return tempo_s
+
+    def _mover_e_aguardar(self, x, y, z, A, B, C, feedrate=1000):
+        """Executa o movimento e aguarda o tempo estimado de percurso."""
+        self.executar_movimento(x, y, z, A, B, C, feedrate=feedrate)
+        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C, feedrate=feedrate)
+        time.sleep(pausa + 1)
 
     def home(self):
         """Retorna o robô à posição inicial (Home) com trajetória Bézier e atualiza o estado."""
@@ -153,8 +138,7 @@ class RobotController:
             print("Modo juntas ativo — use o Home para retornar antes de executar a rotina.")
             return
 
-        self.calc_erro.limpar_historico()
-        b = np.array([-137, 645, 25])
+        b = self.base_offset
         # ---------------------------------------------------------
         # 1. DEFINIÇÃO DOS PONTOS E MATRIZES
         # ---------------------------------------------------------
@@ -197,7 +181,7 @@ class RobotController:
         x, y, z = bz.calculo_pontos(self.P0, P_apr_lapis, self.Ri, R_baixo)
         if plot_callback: plot_callback(list(x), list(y), list(z), True)
         A, B, C = self.interpolar_abc(self.Ri, self.P0, R_baixo, P_lapis, 21)
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="1. Home -> Aprox Lápis (Bézier)")
+        self.executar_movimento(x, y, z, A, B, C)
         self.Ri = R_baixo
         self.P0 = P_apr_lapis
 
@@ -209,7 +193,7 @@ class RobotController:
         A = np.full(21, A[-1])
         B = np.full(21, B[-1])
         C = np.full(21, C[-1])
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="2. Descer no Lápis (Linear)")
+        self.executar_movimento(x, y, z, A, B, C)
         pausa = self.calcular_tempo_trajetoria(x,y,z,A,B,C)
         time.sleep(pausa+1)
         self.serial.send("M97 B0 T0.2") # Fecha a garra
@@ -217,7 +201,7 @@ class RobotController:
         
         x, y, z = bz.calculo_linear(P_lapis, P_apr_lapis, R_baixo)
         if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="3. Subir c/ Lápis (Linear)")
+        self.executar_movimento(x, y, z, A, B, C)
         self.P0 = P_apr_lapis
 
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
@@ -227,7 +211,7 @@ class RobotController:
         x, y, z = bz.calculo_pontos(self.P0, P_apr_suporte, self.Ri, R_vertical)
         if plot_callback: plot_callback(list(x), list(y), list(z), False)
         A, B, C = self.interpolar_abc(self.Ri, self.P0, R_vertical, P_suporte, 21)
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="4. Aprox Lápis -> Aprox Suporte (Bézier)")
+        self.executar_movimento(x, y, z, A, B, C)
         self.Ri = R_vertical
         self.P0 = P_apr_suporte
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
@@ -239,7 +223,7 @@ class RobotController:
         A = np.full(21, A[-1])
         B = np.full(21, B[-1])
         C = np.full(21, C[-1])
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="5. Descer no Suporte (Linear)")
+        self.executar_movimento(x, y, z, A, B, C)
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
         time.sleep(pausa+1)
         self.serial.send("M97 B60 T0.2") # Abre a garra
@@ -247,7 +231,7 @@ class RobotController:
         
         x, y, z = bz.calculo_linear(P_suporte, P_apr_suporte, R_vertical)
         if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="6. Subir do Suporte (Linear)")
+        self.executar_movimento(x, y, z, A, B, C)
         self.P0 = P_apr_suporte
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
         time.sleep(pausa+1)
@@ -256,21 +240,15 @@ class RobotController:
         x, y, z = self.home()
         if plot_callback: plot_callback(list(x), list(y), list(z), False)
 
-        # Salva o relatório .txt automaticamente com a tabela de erros
-        self.calc_erro.salvar_relatorio_txt("relatorio_erros.txt")
-        print("\n" + self.calc_erro.gerar_tabela_txt())
-
     def rotina_objeto_mesa(self, plot_callback=None):
         if self.modo_juntas:
             print("Modo juntas ativo — use o Home para retornar antes de executar a rotina.")
             return
 
-        self.calc_erro.limpar_historico()
-        b = np.array([-137, 645, 25])
         # ---------------------------------------------------------
         # 1. DEFINIÇÃO DOS PONTOS E MATRIZES
         # ---------------------------------------------------------
-        P_lapis = np.array([-300, 210, 0])        # Lápis na mesa
+        P_lapis = np.array([-300, 210, 0]) - self.base_offset
 
         # Rotações
         # R1: Garra para baixo (para pegar o lápis deitado)
@@ -278,43 +256,22 @@ class RobotController:
                             [ -1, 0,  0], 
                             [ 0,  0, -1]]) 
 
-        P_lapis -= b
-
         x, y, z = bz.calculo_pontos(self.P0, P_lapis, self.Ri, R_baixo)
         if plot_callback: plot_callback(list(x), list(y), list(z), True)
         A, B, C = self.interpolar_abc(self.Ri, self.P0, R_baixo, P_lapis, 21)
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="1. Home -> Lápis na Mesa (Bézier)")
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.serial.send("M97 B0 T0.2") # Fecha a garra
         time.sleep(1) # Aguarda fechamento
 
-        x, y, z = x[::-1], y[::-1], z[::-1]
-        A, B, C = A[::-1], B[::-1], C[::-1]
+        xr, yr, zr = x[::-1], y[::-1], z[::-1]
+        Ar, Br, Cr = A[::-1], B[::-1], C[::-1]
 
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="2. Elevação / Retorno (Bézier)")
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
-
-        x, y, z = x[::-1], y[::-1], z[::-1]
-        A, B, C = A[::-1], B[::-1], C[::-1]
-
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="3. Descer Novamente (Bézier)")
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
+        self._mover_e_aguardar(xr, yr, zr, Ar, Br, Cr)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.serial.send("M97 B60 T0.2") # Fecha a garra
         time.sleep(1) # Aguarda fechamento
 
-        x, y, z = x[::-1], y[::-1], z[::-1]
-        A, B, C = A[::-1], B[::-1], C[::-1]
-
-        self.executar_movimento(x, y, z, A, B, C, nome_trajetoria="4. Retorno Final Home (Bézier)")
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
-
-        # Salva o relatório .txt automaticamente com a tabela de erros
-        self.calc_erro.salvar_relatorio_txt("relatorio_erros.txt")
-        print("\n" + self.calc_erro.gerar_tabela_txt())
+        self._mover_e_aguardar(xr, yr, zr, Ar, Br, Cr)
 
     def rotina_captura_calibracao(self, cap):
 
@@ -322,9 +279,8 @@ class RobotController:
         u = np.array([2, 1, 0]) ## Normal à mesa e com inclinaçao com a parede
         v = np.array([0, 0, 1])
 
-        b = np.array([-137, 645, 25])
-        c = np.array([-300, 210, 0])  
-        c -= b
+        b = self.base_offset
+        c = np.array([-300, 210, 0]) - b
 
         px, py, pz = sc.calc_semi_circ(c, u, v)
 

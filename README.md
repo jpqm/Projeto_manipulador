@@ -12,14 +12,16 @@ controlador GRBL e espelha o movimento em tempo real no Unity 3D.
   GRBL; depois de um comando de juntas, trajetórias/rotina ficam bloqueadas até o Home
 - **Espelhamento no Unity 3D** via socket TCP com duração real de cada segmento
   (feedrate linear `F800`), sincronizando a velocidade do gêmeo digital com o robô
+- **Detecção de objetos (YOLO)**: inferência de visão computacional em thread assíncrona PyQt
+- **Rotina de calibração**: movimentação em trajetória semicircular para captura de poses da câmera
 - **Log de G-Code + recuperação de falha**: ao reiniciar, o robô desfaz o último
   movimento incompleto (G1) e reancora o zero antes de continuar
-- **Simulação sem hardware**: usa `MockSerialGRBL` por padrão
+- **Simulação de GRBL**: módulo `MockSerialGRBL` disponível para testes sem hardware
 
 ## Requisitos
 
 - Python 3.10+
-- Dependências: `numpy`, `PyQt6`, `opencv-python`, `pyserial`
+- Dependências: `numpy`, `PyQt6`, `opencv-python`, `pyserial`, `ultralytics`
 
 ## Como executar
 
@@ -27,30 +29,25 @@ controlador GRBL e espelha o movimento em tempo real no Unity 3D.
 python main.py
 ```
 
-Por padrão, `SIMULAR_GRBL=1` e o robô é simulado. Para usar o hardware real
-(placa GRBL em `COM3`, 115200 baud):
-
-```bash
-set SIMULAR_GRBL=0
-python main.py
-```
-
-Para ajustar a porta/baud, edite `SerialDriver.__init__` em `serial_driver.py`.
-O endereço do Unity (`host`/`porta`) fica em `UnityClient.__init__` em
-`unity_client.py`.
+A conexão serial padrão com a controladora GRBL utiliza a porta `COM3` a 115200 baud.
+Para ajustar a porta/baud, configure os parâmetros em `SerialDriver.__init__` em `serial_driver.py`.
+O endereço do Unity (`host`/`porta`) fica em `UnityClient.__init__` em `unity_client.py`.
 
 ## Estrutura
 
 | Arquivo | Responsabilidade |
 |---|---|
 | `main.py` | Ponto de entrada: monta as dependências, recupera a posição e inicia a GUI |
-| `gui.py` | Interface PyQt6 (feed de câmera via OpenCV, campos J1–J6 e controles) |
-| `robot_control.py` | Orquestração: interpolação, movimentos, envio de juntas, recuperação de falha |
-| `ik_craig.py` | Cinemática inversa (método de Craig) |
-| `bezier.py` | Geração da trajetória Bézier em `(x, y, z)` |
+| `gui.py` | Interface PyQt6 (feed de câmera via OpenCV, campos J1–J6, controles e detecção) |
+| `robot_control.py` | Orquestração: interpolação, movimentos, envio de juntas, rotinas e recuperação |
+| `ik_craig.py` | Cinemática inversa (método de Craig) de posição e orientação |
+| `bezier.py` | Geração de trajetórias Bézier e interpolação linear em `(x, y, z)` |
+| `semi_circ.py` | Geração de trajetória semicircular tridimensional para rotina de calibração |
+| `yolo_detector.py` | Detector de objetos utilizando modelo YOLO (Ultralytics) |
+| `detection_thread.py` | Thread assíncrona PyQt para captura de frame e predição com detector |
 | `serial_driver.py` | Comunicação serial com o GRBL + log de G-Code |
 | `unity_client.py` | Cliente TCP para espelhamento no Unity (envia ângulos + duração do segmento) |
-| `mock_serial.py` | Simulador de GRBL (sem hardware) |
+| `mock_serial.py` | Simulador de GRBL para testes locais |
 | `config.py` | Parâmetros GRBL (`$`) e nome do arquivo de log |
 
 ## Recuperação de falha

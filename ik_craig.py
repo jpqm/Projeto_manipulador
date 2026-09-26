@@ -70,9 +70,10 @@ def calculo_angulos(x, y, z):
 
     return theta1, theta2, theta3
 
-def calculo_angulos_abc(R, P):
+def calculo_angulos_abc(R, P, compensar_de=True):
     """Cinemática inversa de orientação: retorna os ângulos A, B e C (juntas 4, 5 e 6)."""
-    P = P - de*R[:,-1].T
+    if compensar_de:
+        P = P - de*R[:,-1].T
 
     P = P.reshape(3,1)
 
@@ -151,3 +152,6 @@ def calculo_angulos_abc(R, P):
 
     return theta4, theta5, theta6
 
+def calculo_angulos_abc_semi_circ(R, P):
+    """Cinemática inversa de orientação sem compensar o deslocamento de ponta."""
+    return calculo_angulos_abc(R, P, compensar_de=False)

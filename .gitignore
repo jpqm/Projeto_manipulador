@@ -8,7 +8,13 @@
 *.slnx
 *.csproj
 
+/.vs/
+/.vscode/
+/projeto/
 /manipulador/
 /__pycache__/
+*.py[cod]
 /graphify-out/
 /gcode_log.txt
+/capturas/
+relatorio_erros.txt

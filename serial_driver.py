@@ -6,21 +6,21 @@ from config import GRBL_SETTINGS, GCODE_LOG
 class SerialDriver:
     def __init__(self, port='COM3', baudrate=115200):
         """Cria a conexão serial real ou simulada e abre o arquivo de log de G-Code."""
-        # self.ser = serial.Serial(port, baudrate, timeout=1)
+        self.ser = serial.Serial(port, baudrate, timeout=1)
 
-        # time.sleep(2)  # espera GRBL iniciar
+        time.sleep(2)  # espera GRBL iniciar
 
-        # while self.ser.in_waiting:
-        #     line = self.ser.readline().decode().strip()
-        #     if line:
-        #         print("BOOT:", line)
+        while self.ser.in_waiting:
+            line = self.ser.readline().decode().strip()
+            if line:
+                print("BOOT:", line)
         
-        simular = os.environ.get("SIMULAR_GRBL", "1") == "1"
-        if simular:
-            from mock_serial import MockSerialGRBL
-            self.ser = MockSerialGRBL()
-        else:
-            self.ser = serial.Serial(port, baudrate, timeout=1)
+        # simular = os.environ.get("SIMULAR_GRBL", "1") == "1"
+        # if simular:
+        #     from mock_serial import MockSerialGRBL
+        #     self.ser = MockSerialGRBL()
+        # else:
+        #     self.ser = serial.Serial(port, baudrate, timeout=1)
 
         self._log = open(GCODE_LOG, "a")
 

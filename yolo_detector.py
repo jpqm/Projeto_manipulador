@@ -1,15 +1,12 @@
-import os
+from pathlib import Path
 from ultralytics import YOLO
 
-DEFAULT_WEIGHTS = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "yolo", "pesos", "last.pt"
-)
+DEFAULT_WEIGHTS = Path(__file__).parent / "yolo" / "pesos" / "last.pt"
 
 
 class YOLODetector:
     def __init__(self, weights_path=DEFAULT_WEIGHTS, conf=0.5):
-        if not os.path.exists(weights_path):
+        if not Path(weights_path).exists():
             raise FileNotFoundError(f"Pesos do YOLO nao encontrados em: {weights_path}")
         self.model = YOLO(weights_path)
         self.conf = conf

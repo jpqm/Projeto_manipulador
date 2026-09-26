@@ -12,7 +12,7 @@ from detection_thread import DetectionThread
 
 import time
 
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 CAMERA_TICK_MS = 30
 
 
@@ -65,6 +65,7 @@ class RobotGUI(QMainWindow):
     def __init__(self, controller):
         """Monta a janela, conecta os sinais e inicia o timer de escuta do Unity."""
         super().__init__()
+
         self.controller = controller
         self.em_movimento = threading.Event()
         self.detector = YOLODetector()
@@ -133,7 +134,7 @@ class RobotGUI(QMainWindow):
         left_layout.addWidget(btn_rotina)
 
         btn_abrir = QPushButton("Abrir Garra")
-        btn_abrir.clicked.connect(lambda: self.controller.serial.send("M97 B60 T0.2"))
+        btn_abrir.clicked.connect(lambda: self.controller.serial.send("M97 B50 T0.2"))
         left_layout.addWidget(btn_abrir)
 
         btn_fechar = QPushButton("Fechar Garra")
@@ -145,6 +146,12 @@ class RobotGUI(QMainWindow):
         btn_reconhecer.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         btn_reconhecer.clicked.connect(self.reconhecer)
         left_layout.addWidget(btn_reconhecer)
+
+        btn_calibracao = QPushButton("Capturar calibração")
+        btn_calibracao.setMinimumHeight(40)
+        btn_calibracao.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        btn_calibracao.clicked.connect(self.executar_rotina_calibracao)
+        left_layout.addWidget(btn_calibracao)
 
         log_group = QGroupBox("Log Deteccao")
         log_layout = QVBoxLayout(log_group)
@@ -222,8 +229,21 @@ class RobotGUI(QMainWindow):
     def executar_rotina_lapis(self):
         def _disparar():
             self.update_status.emit("Executando Pick & Place...")
-            self.controller.rotina_objeto_mesa()
+            self.controller.rotina_lapis_suporte()
             self.update_status.emit("Rotina concluída!")
+
+        if not self.em_movimento.is_set():
+            threading.Thread(target=_disparar, daemon=True).start()
+
+    def executar_rotina_calibracao(self):
+        def _disparar():
+            self.em_movimento.set()
+            self.update_status.emit("Executando rotina de calibração...")
+            try:
+                self.controller.rotina_captura_calibracao(self.camera._cap)
+                self.update_status.emit("Calibração concluída!")
+            finally:
+                self.em_movimento.clear()
 
         if not self.em_movimento.is_set():
             threading.Thread(target=_disparar, daemon=True).start()
