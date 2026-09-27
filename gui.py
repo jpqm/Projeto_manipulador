@@ -184,7 +184,7 @@ class RobotGUI(QMainWindow):
                 self.set_status("Modo juntas ativo — pressione Home para retornar")
                 return
 
-            j1, j2, j3, j4, j5, j6 = unity.get_current_unity_angles()
+            j1, j2, j3, j4, j5, j6 = unity.latest_angles
 
             print("=" * 50)
             print("[UNITY] Botão 'ENVIAR' pressionado na interface!")

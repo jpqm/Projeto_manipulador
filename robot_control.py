@@ -9,7 +9,14 @@ import bezier as bz
 import ik_craig as ik
 from config import GCODE_LOG
 
-import semi_circ as sc
+def calc_semi_circ(c, u, v, r=500):
+    t = np.linspace(0, 1, 20)[:, np.newaxis]
+    u = np.asarray(u, dtype=float) / np.linalg.norm(u)
+    v = np.asarray(v, dtype=float)
+    v = v - np.dot(v, u) * u
+    v = v / np.linalg.norm(v)
+    pontos = c + r * np.cos(np.pi * t) * u + r * np.sin(np.pi * t) * v
+    return pontos[:, 0], pontos[:, 1], pontos[:, 2]
 
 class RobotController:
     def __init__(self, serial_driver, unity_client):
@@ -33,7 +40,7 @@ class RobotController:
                 np.round(np.linspace(B0, Bf, n), 2),
                 np.round(np.linspace(C0, Cf, n), 2))
 
-    def executar_movimento(self, x, y, z, A, B, C, feedrate=1000):
+    def executar_movimento(self, x, y, z, A, B, C, feedrate=800):
         """Calcula os ângulos das juntas para cada ponto, envia ao GRBL (G1) e espelha no Unity."""
         angulos = []
         for i in range(len(x)):
@@ -54,7 +61,7 @@ class RobotController:
         self.serial.send(f"G1 X{j1} Y{j2} Z{j3} A{j4} B{j6} C{j5} F800")
         self.unity.send_angles(j1, j2, -j3, -j4, j5, j6, 800)
 
-    def calcular_tempo_trajetoria(self, x, y, z, theta4, theta5, theta6, feedrate=1000, fator_seg=1.1):
+    def calcular_tempo_trajetoria(self, x, y, z, theta4, theta5, theta6, feedrate=800, fator_seg=1.1):
         """Estima o tempo (s) da trajetória pela distância percorrida em cada segmento dividida pelo feedrate."""
         angulos = []
         for i in range(21):
@@ -71,7 +78,7 @@ class RobotController:
         print(f"[TRAJETÓRIA] Tempo estimado: {tempo_s:.1f} s")
         return tempo_s
 
-    def _mover_e_aguardar(self, x, y, z, A, B, C, feedrate=1000):
+    def _mover_e_aguardar(self, x, y, z, A, B, C, feedrate=800):
         """Executa o movimento e aguarda o tempo estimado de percurso."""
         self.executar_movimento(x, y, z, A, B, C, feedrate=feedrate)
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C, feedrate=feedrate)
@@ -131,190 +138,101 @@ class RobotController:
         self.serial.send("G92 X0 Y0 Z0 A0 B0 C0")
         self.serial.send("G1 X0 Y0 Z0 A0 B0 C0 F800")
 
-    def rotina_lapis_suporte(self, plot_callback=None):
-        """Máquina de estados que pega o lápis da mesa e o encaixa no suporte, desenhando no gráfico quando há callback."""
-
+    def rotina_lapis_suporte(self):
+        """Máquina de estados que pega o lápis da mesa e o encaixa no suporte."""
         if self.modo_juntas:
             print("Modo juntas ativo — use o Home para retornar antes de executar a rotina.")
             return
 
         b = self.base_offset
-        # ---------------------------------------------------------
-        # 1. DEFINIÇÃO DOS PONTOS E MATRIZES
-        # ---------------------------------------------------------
-        P_lapis = np.array([-300, 210, 0])        # Lápis na mesa
-        P_apr_lapis = P_lapis + np.array([0, 0, 100]) # 10cm acima do lápis
+        P_lapis = np.array([-300, 210, 0]) - b
+        P_apr_lapis = P_lapis + np.array([0, 0, 100])
         
-        P_suporte = np.array([10, 120, 250])     # Ponto de encaixe no suporte
-        P_apr_suporte = P_suporte + np.array([0, 0, 100]) # 10cm acima do suporte
+        P_suporte = np.array([10, 120, 250]) - b
+        P_apr_suporte = P_suporte + np.array([0, 0, 100])
 
-        # Rotações
-        # R1: Garra para baixo (para pegar o lápis deitado)
         R_baixo = np.array([[ 0,  -1,  0], 
                             [ -1, 0,  0], 
                             [ 0,  0, -1]]) 
         
-        # R2: Garra virada 90 graus (Pitch/Roll) para o lápis ficar na vertical
-        gama = 0
         alpha = np.rad2deg(np.arctan2(abs(P_suporte[1] - b[1]), abs(P_suporte[0] - b[0])))
-        if b[0] > P_suporte[0]:
-            gama = -(180-alpha)
-        else:
-            gama = -alpha
-
-        print(f"Alpha = {alpha}")
-        print(f"gama = {gama}")
+        gama = -(180 - alpha) if b[0] > P_suporte[0] else -alpha
         gama_rad = np.deg2rad(gama)
 
         R_vertical = np.array([[-np.sin(gama_rad), 0, np.cos(gama_rad)],
-                    [np.cos(gama_rad), 0, np.sin(gama_rad)],
-                    [0,                1, 0]], dtype=float)
+                               [np.cos(gama_rad), 0, np.sin(gama_rad)],
+                               [0,                1, 0]], dtype=float)
 
-        # ---------------------------------------------------------
-        # 2. EXECUÇÃO DA MÁQUINA DE ESTADOS
-        # ---------------------------------------------------------
-        P_lapis -= b
-        P_apr_lapis -= b
-        P_suporte -= b
-        P_apr_suporte -= b
-        # Estado 1: Sair do Home para cima do Lápis (Bézier)
+        # Estado 1: Home -> P_apr_lapis (Bézier)
         x, y, z = bz.calculo_pontos(self.P0, P_apr_lapis, self.Ri, R_baixo)
-        if plot_callback: plot_callback(list(x), list(y), list(z), True)
         A, B, C = self.interpolar_abc(self.Ri, self.P0, R_baixo, P_lapis, 21)
-        self.executar_movimento(x, y, z, A, B, C)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.Ri = R_baixo
         self.P0 = P_apr_lapis
 
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
-        # Estado 2: Descer, pegar o lápis e Recuar (Linear)
+        # Estado 2: Descer, pegar lápis e recuar (Linear)
         x, y, z = bz.calculo_linear(P_apr_lapis, P_lapis, R_baixo)
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        A = np.full(21, A[-1])
-        B = np.full(21, B[-1])
-        C = np.full(21, C[-1])
-        self.executar_movimento(x, y, z, A, B, C)
-        pausa = self.calcular_tempo_trajetoria(x,y,z,A,B,C)
-        time.sleep(pausa+1)
+        A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.serial.send("M97 B0 T0.2") # Fecha a garra
-        time.sleep(1) # Aguarda fechamento
-        
+        time.sleep(1)
+
         x, y, z = bz.calculo_linear(P_lapis, P_apr_lapis, R_baixo)
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        self.executar_movimento(x, y, z, A, B, C)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.P0 = P_apr_lapis
 
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
-
-        # Estado 3: Ir para cima do suporte girando a garra (Bézier)
+        # Estado 3: P_apr_lapis -> P_apr_suporte (Bézier)
         x, y, z = bz.calculo_pontos(self.P0, P_apr_suporte, self.Ri, R_vertical)
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
         A, B, C = self.interpolar_abc(self.Ri, self.P0, R_vertical, P_suporte, 21)
-        self.executar_movimento(x, y, z, A, B, C)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.Ri = R_vertical
         self.P0 = P_apr_suporte
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
 
-        # Estado 4: Descer no suporte, soltar e Recuar (Linear)
+        # Estado 4: Descer no suporte, soltar e recuar (Linear)
         x, y, z = bz.calculo_linear(P_apr_suporte, P_suporte, R_vertical)
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        A = np.full(21, A[-1])
-        B = np.full(21, B[-1])
-        C = np.full(21, C[-1])
-        self.executar_movimento(x, y, z, A, B, C)
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
+        A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.serial.send("M97 B60 T0.2") # Abre a garra
         time.sleep(1)
-        
+
         x, y, z = bz.calculo_linear(P_suporte, P_apr_suporte, R_vertical)
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
-        self.executar_movimento(x, y, z, A, B, C)
+        self._mover_e_aguardar(x, y, z, A, B, C)
         self.P0 = P_apr_suporte
-        pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C)
-        time.sleep(pausa+1)
 
-        # Estado 5: Voltar para Home (Bézier)
-        x, y, z = self.home()
-        if plot_callback: plot_callback(list(x), list(y), list(z), False)
-
-    def rotina_objeto_mesa(self, plot_callback=None):
-        if self.modo_juntas:
-            print("Modo juntas ativo — use o Home para retornar antes de executar a rotina.")
-            return
-
-        # ---------------------------------------------------------
-        # 1. DEFINIÇÃO DOS PONTOS E MATRIZES
-        # ---------------------------------------------------------
-        P_lapis = np.array([-300, 210, 0]) - self.base_offset
-
-        # Rotações
-        # R1: Garra para baixo (para pegar o lápis deitado)
-        R_baixo = np.array([[ 0,  -1,  0], 
-                            [ -1, 0,  0], 
-                            [ 0,  0, -1]]) 
-
-        x, y, z = bz.calculo_pontos(self.P0, P_lapis, self.Ri, R_baixo)
-        if plot_callback: plot_callback(list(x), list(y), list(z), True)
-        A, B, C = self.interpolar_abc(self.Ri, self.P0, R_baixo, P_lapis, 21)
-        self._mover_e_aguardar(x, y, z, A, B, C)
-        self.serial.send("M97 B0 T0.2") # Fecha a garra
-        time.sleep(1) # Aguarda fechamento
-
-        xr, yr, zr = x[::-1], y[::-1], z[::-1]
-        Ar, Br, Cr = A[::-1], B[::-1], C[::-1]
-
-        self._mover_e_aguardar(xr, yr, zr, Ar, Br, Cr)
-        self._mover_e_aguardar(x, y, z, A, B, C)
-        self.serial.send("M97 B60 T0.2") # Fecha a garra
-        time.sleep(1) # Aguarda fechamento
-
-        self._mover_e_aguardar(xr, yr, zr, Ar, Br, Cr)
+        # Estado 5: Voltar para Home
+        self.home()
 
     def rotina_captura_calibracao(self, cap):
-
-        # u = np.array([1, 0, 0]) ## Normal à mesa e paralelo à parede
-        u = np.array([2, 1, 0]) ## Normal à mesa e com inclinaçao com a parede
+        u = np.array([2, 1, 0])
         v = np.array([0, 0, 1])
-
         b = self.base_offset
         c = np.array([-300, 210, 0]) - b
 
-        px, py, pz = sc.calc_semi_circ(c, u, v)
+        px, py, pz = calc_semi_circ(c, u, v)
 
-        """Usar range(4,12) para paralelo à parede e range(4,10) com inclinaçao com a parede"""
-        for i in range(4,10):
+        for i in range(4, 10):
             P_atual = np.array([px[i], py[i], pz[i]])
             P_proximo = np.array([px[i+1], py[i+1], pz[i+1]])
             x, y, z = ik.calculo_angulos(px[i], py[i], pz[i])
-            # 1. Eixo Z: Aponta para o centro
+
             Z_e = c - P_atual
             Z_hat = Z_e / np.linalg.norm(Z_e)
-            
-            # 2. Eixo Y: Tangente com ortogonalização de Gram-Schmidt
+
             v_e = P_proximo - P_atual
             Y_e = v_e - np.dot(v, Z_hat) * Z_hat
             Y_hat = Y_e / np.linalg.norm(Y_e)
-            
-            # 3. Eixo X: Produto vetorial (Y x Z)
+
             X_hat = np.cross(Y_hat, Z_hat)
-            X_hat = X_hat / np.linalg.norm(X_hat) # Garantia extra de normalização
-            
-            # 4. Construir Matriz de Rotação (3x3)
+            X_hat = X_hat / np.linalg.norm(X_hat)
+
             R_matrix = np.column_stack((X_hat, Y_hat, Z_hat))
-            A, B, C = ik.calculo_angulos_abc_semi_circ(R_matrix, P_atual)
+            A, B, C = ik.calculo_angulos_abc(R_matrix, P_atual, compensar_de=False)
             C = 0
             self.enviar_juntas(x, y, z, A, B, C)
-            if i == 4:
-                time.sleep(15)
-            else:
-                time.sleep(5)
-             # === ADICIONAR ESTE BLOCO NO FINAL DA FUNÇÃO ===
+            time.sleep(15 if i == 4 else 5)
+
             print("Realizando a captura de imagem da calibração...")
             ret, frame = cap.read()
-
             if ret:
                 os.makedirs("capturas", exist_ok=True)
                 nome_arquivo = f"pos(x={px[i]:.2f}__y={py[i]:.2f}__z={pz[i]:.2f}).jpg"

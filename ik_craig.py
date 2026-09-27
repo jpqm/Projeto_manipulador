@@ -4,21 +4,14 @@ a1_1 = 0
 a2_1 = 20.3563
 a3_1 = 261.01
 a4_1 = 21.7052
-a5_1 = 0
-a6_1 = 0
 d1 = 287.628
 d2 = 0
 d3 = 0
 d4 = 264.193
-d5 = 0
-d6 = 0
 de = 118.815
 alpha1_1 = 0
 alpha2_1 = -90
 alpha3_1 = 0
-alpha4_1 = -90
-alpha5_1 = 90
-alpha6_1 = -90
 
 # Matriz homogênea para DH (Craig)
 def matriz_trans_np(d, a, theta, alpha):
@@ -151,7 +144,3 @@ def calculo_angulos_abc(R, P, compensar_de=True):
     theta5 = -theta5
 
     return theta4, theta5, theta6
-
-def calculo_angulos_abc_semi_circ(R, P):
-    """Cinemática inversa de orientação sem compensar o deslocamento de ponta."""
-    return calculo_angulos_abc(R, P, compensar_de=False)

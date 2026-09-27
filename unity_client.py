@@ -78,16 +78,12 @@ class UnityClient:
         except Exception as e:
             print(f"[Unity] Erro ao enviar: {e}")
 
-    def get_current_unity_angles(self):
-        """Retorna a última lista de ângulos recebida do Unity."""
-        return self.latest_angles
 
     def check_button_pressed(self):
-        """ Retorna True se o botão do Unity foi clicado desde a última checagem """
-        if self.button_triggered:
-            self.button_triggered = False # Desarma depois de ler
-            return True
-        return False
+        """Retorna True se o botão do Unity foi clicado desde a última checagem."""
+        triggered = self.button_triggered
+        self.button_triggered = False
+        return triggered
 
     def close(self):
         """Encerra a escuta e fecha o socket."""
