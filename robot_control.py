@@ -52,7 +52,16 @@ class RobotController:
             self.unity.send_angles(theta1, theta2, -theta3, -A[i], B[i], -C[i], feedrate)
             self.serial.send(f"G1 X{theta1} Y{theta2} Z{theta3} A{A_grbl} B{B_grbl} C{C_grbl} F{feedrate}")
 
+    def ponto_alcancavel(self, ponto, arquivo="workspace_voxel.npz"):
+        """Retorna True se o ponto [x, y, z] em mm estiver dentro do voxel grid pré-computado."""
+        if not hasattr(self, "_voxel_data") or self._voxel_data is None:
+            self._voxel_data = np.load(arquivo)
+        grid, min_bound, res = self._voxel_data["grid"], self._voxel_data["min_bound"], self._voxel_data["voxel_size"]
 
+        idx = ((np.asarray(ponto) - min_bound) / res).astype(int)
+        if np.any(idx < 0) or np.any(idx >= grid.shape):
+            return False
+        return bool(grid[tuple(idx)])
 
     def enviar_juntas(self, j1, j2, j3, j4, j5, j6):
         """Envia um G1 direto com os 6 ângulos das juntas (valores GRBL) e espelha no Unity.
@@ -147,6 +156,10 @@ class RobotController:
         b = self.base_offset
         P_lapis = np.array([-300, 210, 0]) - b
         P_apr_lapis = P_lapis + np.array([0, 0, 100])
+        print(P_lapis)
+
+        if self.ponto_alcancavel(P_lapis):
+            print("alcancavel")
         
         P_suporte = np.array([10, 120, 250]) - b
         P_apr_suporte = P_suporte + np.array([0, 0, 100])

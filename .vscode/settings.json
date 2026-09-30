@@ -67,5 +67,6 @@
         "*.sln": "*.csproj",
         "*.slnx": "*.csproj"
     },
-    "dotnet.defaultSolution": "teste_arctos.slnx"
+    "dotnet.defaultSolution": "teste_arctos.slnx",
+    "python.defaultInterpreterPath": "${workspaceFolder}\\projeto\\Scripts\\python.exe"
 }
