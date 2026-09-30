@@ -1,29 +1,38 @@
 import numpy as np
 import roboticstoolbox as rtb
 import matplotlib.pyplot as plt
+from scipy.ndimage import binary_dilation
 import ik_craig as ik
 
 # 1. Definir os elos usando RevoluteMDH (Parâmetros de Craig)
 # A assinatura recebe: a (que representa a_{i-1}), alpha (alpha_{i-1}), d (d_i) e o limite da junta
 # Substitua os valores pelos do seu gêmeo digital/projeto
-link1 = rtb.RevoluteMDH(a=ik.a1_1,    alpha=np.deg2rad(ik.alpha1_1),  d=ik.d1,    qlim=[0, 2*np.pi])
+link1 = rtb.RevoluteMDH(a=ik.a1_1,    alpha=np.deg2rad(ik.alpha1_1),  d=ik.d1,    qlim=[np.deg2rad(-200), np.deg2rad(200)])
 link2 = rtb.RevoluteMDH(a=ik.a2_1,    alpha=np.deg2rad(ik.alpha2_1),  d=ik.d2,    qlim=[np.deg2rad(-75), np.deg2rad(125)], offset=-np.pi/2)
 link3 = rtb.RevoluteMDH(a=ik.a3_1,    alpha=np.deg2rad(ik.alpha3_1),  d=ik.d3,    qlim=[np.deg2rad(-50), np.deg2rad(100)])
-link4 = rtb.RevoluteMDH(a=ik.a4_1,    alpha=np.deg2rad(-90),          d=ik.d4,    qlim=[0, 2*np.pi])
-link5 = rtb.RevoluteMDH(a=0,          alpha=np.deg2rad(90),           d=0,        qlim=[-np.pi/4, np.pi/4])
-link6 = rtb.RevoluteMDH(a=0,          alpha=np.deg2rad(-90),          d=ik.de,    qlim=[0, 2*np.pi])
+link4 = rtb.RevoluteMDH(a=ik.a4_1,    alpha=np.deg2rad(-90),          d=ik.d4,    qlim=[np.deg2rad(-200), np.deg2rad(200)])
+link5 = rtb.RevoluteMDH(a=0,          alpha=np.deg2rad(90),           d=0,        qlim=[-np.pi/2, np.pi/2])
+link6 = rtb.RevoluteMDH(a=0,          alpha=np.deg2rad(-90),          d=ik.de,    qlim=[np.deg2rad(-200), np.deg2rad(200)])
 
 # Criar o robô 6-DOF
-robot_mdh = rtb.DHRobot([link1, link2, link3, link4, link5, link6], name="Manipulador_MDH")
+robot_mdh = rtb.DHRobot([link1, link2, link3, link4, link5, link6], name="Manipulador_Arctos")
+
+# te = robot_mdh.fkine(np.deg2rad([-110, 0, -20, 0, 105, 0]))
+# print(type(te))
+# te = np.array(te)
+# print(type(te))
+# print(te[0,3])
 
 # 2. Configurar o Método de Monte Carlo
-num_pontos = 200000
+num_pontos = 2000000
 q_aleatorios = np.zeros((num_pontos, 6))
 
 # Gerar ângulos aleatórios vetorizados respeitando os limites mecânicos
 for i in range(6):
     q_min, q_max = robot_mdh.links[i].qlim
     q_aleatorios[:, i] = np.random.uniform(q_min, q_max, num_pontos)
+
+q_aleatorios[:, 3:] *= -1
 
 # 3. Cinemática Direta vetorizada para toda a matriz (O gargalo computacional é resolvido aqui)
 # fkine retorna um objeto SE3 do pacote spatialmath
@@ -44,6 +53,7 @@ dimensoes = ((max_bound - min_bound) / voxel_size).astype(int) + 1
 grid = np.zeros(dimensoes, dtype=bool)
 indices = ((pontos - min_bound) / voxel_size).astype(int)
 grid[indices[:, 0], indices[:, 1], indices[:, 2]] = True
+grid = binary_dilation(grid)
 
 np.savez_compressed("workspace_voxel.npz", grid=grid, min_bound=min_bound, voxel_size=voxel_size)
 print(f"Voxel Grid salvo ({grid.shape}, resolução {voxel_size} mm).")

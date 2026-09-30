@@ -10,6 +10,9 @@ from PyQt6.QtGui import QImage, QPixmap
 from yolo_detector import YOLODetector
 from detection_thread import DetectionThread
 
+import ik_craig as ik
+import numpy as np
+
 import time
 
 CAMERA_INDEX = 0
@@ -290,3 +293,10 @@ class RobotGUI(QMainWindow):
 
     def _on_detection_finished(self):
         self.set_status("Deteccao concluida")
+
+    def manipular(self):
+        Rc, Pc = ik.cinematica_direta(-110, 0, -20, 0, -105, 0)
+
+        Po = [-300,210,0]
+
+        self.controller.rotina_manipular(Pc, Po, Rc, 0, -105, 0)

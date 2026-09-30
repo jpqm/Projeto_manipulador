@@ -31,10 +31,16 @@ class RobotController:
                             [1, 0, 0]])
         self.base_offset = np.array([-137, 645, 25])
         self.modo_juntas = False
+        self.R_baixo = np.array([[ 0,  -1,  0], 
+                                 [ -1, 0,  0], 
+                                 [ 0,  0, -1]]) 
 
-    def interpolar_abc(self, R_ini, P_ini, R_fim, P_fim, n=21):
+    def interpolar_abc(self, R_ini, P_ini, R_fim, P_fim, n=21, A=None, B=None, C=None):
         """Interpola linearmente os ângulos do pulso (A, B, C) entre a pose inicial e a final."""
-        A0, B0, C0 = ik.calculo_angulos_abc(R_ini, P_ini)
+        if A == None and B == None and C == None:
+            A0, B0, C0 = ik.calculo_angulos_abc(R_ini, P_ini)
+        else:
+            A0, B0, C0 = A, B, C
         Af, Bf, Cf = ik.calculo_angulos_abc(R_fim, P_fim)
         return (np.round(np.linspace(A0, Af, n), 2),
                 np.round(np.linspace(B0, Bf, n), 2),
@@ -156,17 +162,18 @@ class RobotController:
         b = self.base_offset
         P_lapis = np.array([-300, 210, 0]) - b
         P_apr_lapis = P_lapis + np.array([0, 0, 100])
-        print(P_lapis)
 
         if self.ponto_alcancavel(P_lapis):
             print("alcancavel")
+        else:
+            print("nao alcancavel")
         
         P_suporte = np.array([10, 120, 250]) - b
         P_apr_suporte = P_suporte + np.array([0, 0, 100])
 
-        R_baixo = np.array([[ 0,  -1,  0], 
-                            [ -1, 0,  0], 
-                            [ 0,  0, -1]]) 
+        self.R_baixo = np.array([[ 0,  -1,  0], 
+                                 [ -1, 0,  0], 
+                                 [ 0,  0, -1]]) 
         
         alpha = np.rad2deg(np.arctan2(abs(P_suporte[1] - b[1]), abs(P_suporte[0] - b[0])))
         gama = -(180 - alpha) if b[0] > P_suporte[0] else -alpha
@@ -177,20 +184,20 @@ class RobotController:
                                [0,                1, 0]], dtype=float)
 
         # Estado 1: Home -> P_apr_lapis (Bézier)
-        x, y, z = bz.calculo_pontos(self.P0, P_apr_lapis, self.Ri, R_baixo)
-        A, B, C = self.interpolar_abc(self.Ri, self.P0, R_baixo, P_lapis, 21)
+        x, y, z = bz.calculo_pontos(self.P0, P_apr_lapis, self.Ri, self.R_baixo)
+        A, B, C = self.interpolar_abc(self.Ri, self.P0, self.R_baixo, P_lapis, 21)
         self._mover_e_aguardar(x, y, z, A, B, C)
-        self.Ri = R_baixo
+        self.Ri = self.R_baixo
         self.P0 = P_apr_lapis
 
         # Estado 2: Descer, pegar lápis e recuar (Linear)
-        x, y, z = bz.calculo_linear(P_apr_lapis, P_lapis, R_baixo)
+        x, y, z = bz.calculo_linear(P_apr_lapis, P_lapis, self.R_baixo)
         A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
         self._mover_e_aguardar(x, y, z, A, B, C)
         self.serial.send("M97 B0 T0.2") # Fecha a garra
         time.sleep(1)
 
-        x, y, z = bz.calculo_linear(P_lapis, P_apr_lapis, R_baixo)
+        x, y, z = bz.calculo_linear(P_lapis, P_apr_lapis, self.R_baixo)
         self._mover_e_aguardar(x, y, z, A, B, C)
         self.P0 = P_apr_lapis
 
@@ -260,3 +267,18 @@ class RobotController:
             time.sleep(2)
 
         self.enviar_juntas(0, 0, 0, 0, 0, 0)
+
+    def rotina_manipular(self, p0, p3, Ri, Ac, Bc, Cc):
+        if not self.ponto_alcancavel(p3-self.base_offset):
+            print("Objeto não alcançavel")
+            return
+        else:
+            p3 -= self.base_offset
+            x, y, z = bz.calculo_pontos(p0, p3, Ri, self.R_baixo)
+            A, B, C = self.interpolar_abc(Ri, p0, self.R_baixo, p3, 21, Ac, Bc, Cc)
+            self._mover_e_aguardar(x, y, z, A, B, C)
+            self.P0 = p3
+            self.Ri = self.R_baixo
+            x, y, z = self.home()
+            time.sleep(15)
+            self.serial.send("M97 B60 T0.2")

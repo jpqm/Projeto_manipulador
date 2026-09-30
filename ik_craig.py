@@ -1,5 +1,7 @@
 import numpy as np
 
+import roboticstoolbox as rtb
+
 a1_1 = 0
 a2_1 = 20.3563
 a3_1 = 261.01
@@ -12,6 +14,9 @@ de = 118.815
 alpha1_1 = 0
 alpha2_1 = -90
 alpha3_1 = 0
+alpha4_1 = -90
+alpha5_1 = 90
+alpha6_1 = -90
 
 # Matriz homogênea para DH (Craig)
 def matriz_trans_np(d, a, theta, alpha):
@@ -144,3 +149,19 @@ def calculo_angulos_abc(R, P, compensar_de=True):
     theta5 = -theta5
 
     return theta4, theta5, theta6
+
+def cinematica_direta(theta1, theta2, theta3, theta4, theta5, theta6):
+    link1 = rtb.RevoluteMDH(a=a1_1,    alpha=np.deg2rad(alpha1_1),  d=d1,    qlim=[0, 2*np.pi])
+    link2 = rtb.RevoluteMDH(a=a2_1,    alpha=np.deg2rad(alpha2_1),  d=d2,    qlim=[np.deg2rad(-75), np.deg2rad(125)], offset=-np.pi/2)
+    link3 = rtb.RevoluteMDH(a=a3_1,    alpha=np.deg2rad(alpha3_1),  d=d3,    qlim=[np.deg2rad(-50), np.deg2rad(100)])
+    link4 = rtb.RevoluteMDH(a=a4_1,    alpha=np.deg2rad(-90),       d=d4,    qlim=[0, 2*np.pi])
+    link5 = rtb.RevoluteMDH(a=0,       alpha=np.deg2rad(90),        d=0,     qlim=[-np.pi/2, np.pi/2])
+    link6 = rtb.RevoluteMDH(a=0,       alpha=np.deg2rad(-90),       d=de,    qlim=[0, 2*np.pi])
+
+    # Criar o robô 6-DOF
+    robot_mdh = rtb.DHRobot([link1, link2, link3, link4, link5, link6], name="Manipulador_Arctos")
+
+    te = robot_mdh.fkine(np.deg2rad([theta1, theta2, theta3, theta4, -theta5, theta6]))
+    te = np.array(te)
+
+    return te[:3,:3], te[:3,-1]
