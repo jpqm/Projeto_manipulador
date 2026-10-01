@@ -72,16 +72,19 @@ class RobotController:
             self.unity.send_angles(theta1, theta2, -theta3, -A[i], B[i], -C[i], feedrate)
             self.serial.send(f"G1 X{theta1} Y{theta2} Z{theta3} A{A_grbl} B{B_grbl} C{C_grbl} F{feedrate}")
 
-    def ponto_alcancavel(self, ponto, arquivo="workspace_voxel.npz"):
-        """Retorna True se o ponto [x, y, z] em mm estiver dentro do voxel grid pré-computado."""
-        if not hasattr(self, "_voxel_data") or self._voxel_data is None:
-            self._voxel_data = np.load(arquivo)
-        grid, min_bound, res = self._voxel_data["grid"], self._voxel_data["min_bound"], self._voxel_data["voxel_size"]
-
-        idx = ((np.asarray(ponto) - min_bound) / res).astype(int)
-        if np.any(idx < 0) or np.any(idx >= grid.shape):
+    def ponto_alcancavel(self, ponto, R=None):
+        """Retorna True se todos os 6 ângulos da cinemática inversa forem calculáveis."""
+        if R is None:
+            R = self.R_baixo
+        try:
+            with np.errstate(invalid="ignore"):
+                # ponytail: valida apenas solução matemática (sem NaN); upgrade: checar qlim se colidir
+                Pw = np.asarray(ponto, dtype=float) - ik.de * R[:, -1]
+                t1, t2, t3 = ik.calculo_angulos(*Pw)
+                t4, t5, t6 = ik.calculo_angulos_abc(R, ponto)
+            return not np.any(np.isnan([t1, t2, t3, t4, t5, t6]))
+        except Exception:
             return False
-        return bool(grid[tuple(idx)])
 
     def enviar_juntas(self, j1, j2, j3, j4, j5, j6):
         """Envia um G1 direto com os 6 ângulos das juntas (valores GRBL) e espelha no Unity.
@@ -296,7 +299,7 @@ class RobotController:
         self.enviar_juntas(0, 0, 0, 0, 0, 0)
 
     def rotina_manipular(self, p0, p3, Ri, Ac, Bc, Cc):
-        if not self.ponto_alcancavel(p3-self.base_offset):
+        if not self.ponto_alcancavel(p3 - self.base_offset, self.R_baixo):
             print("Objeto não alcançavel")
             return
         else:
