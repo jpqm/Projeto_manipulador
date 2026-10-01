@@ -297,6 +297,6 @@ class RobotGUI(QMainWindow):
     def manipular(self):
         Rc, Pc = ik.cinematica_direta(-110, 0, -20, 0, -105, 0)
 
-        Po = [-300,210,0]
+        Po = np.array([-300,210,0])
 
         self.controller.rotina_manipular(Pc, Po, Rc, 0, -105, 0)

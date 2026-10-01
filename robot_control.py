@@ -18,6 +18,20 @@ def calc_semi_circ(c, u, v, r=500):
     pontos = c + r * np.cos(np.pi * t) * u + r * np.sin(np.pi * t) * v
     return pontos[:, 0], pontos[:, 1], pontos[:, 2]
 
+def calc_semi_esfera(c, r=500, elev_range=(65, 85), azim_range=(0, 110), n_elev=5, n_azim=6):
+    """Gera pontos em trajetória serpenteada sobre a semi-esfera sem tocar a mesa."""
+    elevs = np.linspace(elev_range[0], elev_range[1], n_elev)
+    pontos = []
+    for idx, el_deg in enumerate(elevs):
+        azims = np.linspace(azim_range[0], azim_range[1], n_azim)
+        if idx % 2 == 1:
+            azims = azims[::-1]
+        el = np.deg2rad(el_deg)
+        for az_deg in azims:
+            az = np.deg2rad(az_deg)
+            pontos.append(c + r * np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)]))
+    return np.array(pontos)
+
 class RobotController:
     def __init__(self, serial_driver, unity_client):
         """Guarda as referências de comunicação e o estado inicial de posição e orientação do robô."""
@@ -223,39 +237,52 @@ class RobotController:
         self.home()
 
     def rotina_captura_calibracao(self, cap):
-        u = np.array([2, 1, 0])
-        v = np.array([0, 0, 1])
         b = self.base_offset
         c = np.array([-300, 210, 0]) - b
+        pontos = calc_semi_esfera(c, r=500)
 
-        px, py, pz = calc_semi_circ(c, u, v)
-
-        for i in range(4, 10):
-            P_atual = np.array([px[i], py[i], pz[i]])
-            P_proximo = np.array([px[i+1], py[i+1], pz[i+1]])
-            x, y, z = ik.calculo_angulos(px[i], py[i], pz[i])
+        for i, P_atual in enumerate(pontos):
+            try:
+                x, y, z = ik.calculo_angulos(P_atual[0], P_atual[1], P_atual[2])
+                if not (-100 <= z <= 50):
+                    continue
+            except Exception:
+                continue
 
             Z_e = c - P_atual
             Z_hat = Z_e / np.linalg.norm(Z_e)
 
-            v_e = P_proximo - P_atual
-            Y_e = v_e - np.dot(v, Z_hat) * Z_hat
+            up = np.array([0, 0, 1])
+            Y_e = up - np.dot(up, Z_hat) * Z_hat
+            if np.linalg.norm(Y_e) < 1e-4:
+                up = np.array([0, 1, 0])
+                Y_e = up - np.dot(up, Z_hat) * Z_hat
             Y_hat = Y_e / np.linalg.norm(Y_e)
 
             X_hat = np.cross(Y_hat, Z_hat)
             X_hat = X_hat / np.linalg.norm(X_hat)
 
             R_matrix = np.column_stack((X_hat, Y_hat, Z_hat))
-            A, B, C = ik.calculo_angulos_abc(R_matrix, P_atual, compensar_de=False)
+            try:
+                A, B, C = ik.calculo_angulos_abc(R_matrix, P_atual, compensar_de=False)
+            except Exception:
+                continue
             C = 0
             self.enviar_juntas(x, y, z, A, B, C)
-            time.sleep(15 if i == 4 else 5)
-
+            if i == 0:
+                time.sleep(15)
+            else:
+                delta_graus = np.max(np.abs(np.array([x, y, z]) - np.array([x_ant, y_ant, z_ant])))
+                tempo_espera = max(4.0, (delta_graus / 800.0) * 60 * 1.2)
+                time.sleep(tempo_espera)
+            x_ant, y_ant, z_ant = x, y, z
+            
             print("Realizando a captura de imagem da calibração...")
             ret, frame = cap.read()
             if ret:
                 os.makedirs("capturas", exist_ok=True)
-                nome_arquivo = f"pos(x={px[i]:.2f}__y={py[i]:.2f}__z={pz[i]:.2f}).jpg"
+                P_mesa = P_atual + self.base_offset
+                nome_arquivo = f"pos(x={P_mesa[0]:.2f}__y={P_mesa[1]:.2f}__z={P_mesa[2]:.2f}).jpg"
                 caminho_arquivo = os.path.join("capturas", nome_arquivo)
                 sucesso = cv2.imwrite(caminho_arquivo, frame)
                 if sucesso:
