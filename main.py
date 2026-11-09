@@ -20,12 +20,12 @@ def main():
     serial_drv.send("F800")
     controller.recuperar_do_log()
     serial_drv.reset_log()
-    serial_drv.send("M97 B40 T0.2")
+    serial_drv.send("M97 B60 T0.2")
 
     # 3. Inicia o ambiente PyQt
     app = QApplication(sys.argv)
-    window = RobotGUI(controller)
-    window.show()
+    window = RobotGUI(controller, serial_drv)
+    window.showMaximized()
 
     # 4. Inicia o loop da interface gráfica (vai travar aqui até o app ser fechado)
     exit_code = app.exec()

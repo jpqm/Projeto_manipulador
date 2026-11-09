@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -111,8 +112,11 @@ class RobotController:
         return tempo_s
 
     def _mover_e_aguardar(self, x, y, z, A, B, C, feedrate=800):
-        """Executa o movimento e aguarda o tempo estimado de percurso."""
+        """Executa o movimento e aguarda o GRBL ficar Idle; se o status falhar, usa o tempo estimado."""
         self.executar_movimento(x, y, z, A, B, C, feedrate=feedrate)
+        if self.serial.wait_idle():
+            return
+        print("[TRAJETÓRIA] Status '?' indisponível — usando tempo estimado.")
         pausa = self.calcular_tempo_trajetoria(x, y, z, A, B, C, feedrate=feedrate)
         time.sleep(pausa + 1)
 
@@ -120,11 +124,12 @@ class RobotController:
         """Retorna o robô à posição inicial (Home) com trajetória Bézier e atualiza o estado."""
         if self.modo_juntas:
             print("Modo juntas ativo — desfazendo último movimento via log (Home).")
-            self.recuperar_do_log()
-            self.P0 = np.array([403.3643, 0, 570.3432])
-            self.Ri = np.array([[0, 0, 1], 
-                                [0, -1, 0], 
-                                [1, 0, 0]])
+            # self.recuperar_do_log()
+            # self.P0 = np.array([403.3643, 0, 570.3432])
+            # self.Ri = np.array([[0, 0, 1], 
+            #                     [0, -1, 0], 
+            #                     [1, 0, 0]])
+            self.enviar_juntas(0, 0, 0, 0, 0, 0)
             self.modo_juntas = False
             return None, None, None
 
@@ -139,6 +144,8 @@ class RobotController:
         self.executar_movimento(x1, y1, z1, A1, B1, C1)
         self.Ri = Rf
         self.P0 = P3
+
+        self.serial.wait_idle()
 
         return x1, y1, z1
 
@@ -190,15 +197,18 @@ class RobotController:
 
         self.R_baixo = np.array([[ 0,  -1,  0], 
                                  [ -1, 0,  0], 
-                                 [ 0,  0, -1]]) 
+                                 [ 0,  0, -1]])
         
-        alpha = np.rad2deg(np.arctan2(abs(P_suporte[1] - b[1]), abs(P_suporte[0] - b[0])))
-        gama = -(180 - alpha) if b[0] > P_suporte[0] else -alpha
+        alpha = np.rad2deg(np.arctan2(abs(P_suporte[1]), abs(P_suporte[0])))
+        if b[0] > P_suporte[0]:
+            gama = -1*(180 - alpha)
+        else:
+            gama = -alpha
         gama_rad = np.deg2rad(gama)
 
         R_vertical = np.array([[-np.sin(gama_rad), 0, np.cos(gama_rad)],
                                [np.cos(gama_rad), 0, np.sin(gama_rad)],
-                               [0,                1, 0]], dtype=float)
+                               [0,                1,                0]], dtype=float)
 
         # Estado 1: Home -> P_apr_lapis (Bézier)
         x, y, z = bz.calculo_pontos(self.P0, P_apr_lapis, self.Ri, self.R_baixo)
@@ -243,6 +253,7 @@ class RobotController:
         b = self.base_offset
         c = np.array([-300, 210, 0]) - b
         pontos = calc_semi_esfera(c, r=500)
+        poses_salvas = {}
 
         for i, P_atual in enumerate(pontos):
             try:
@@ -290,25 +301,42 @@ class RobotController:
                 sucesso = cv2.imwrite(caminho_arquivo, frame)
                 if sucesso:
                     print(f"Imagem salva com sucesso como {caminho_arquivo}")
+                    T = ik.cinematica_direta_T(x, y, z, A, B, C)
+                    poses_salvas[nome_arquivo] = {"T_flange_base": T.tolist()}
                 else:
                     print(f"Erro: OpenCV falhou ao salvar {caminho_arquivo}")
             else:
                 print("Erro: Falha ao ler o frame da câmera já aberta.")
             time.sleep(2)
 
+        with open("capturas/poses_calibracao.json", "w", encoding="utf-8") as f:
+            json.dump(poses_salvas, f, indent=4)
         self.enviar_juntas(0, 0, 0, 0, 0, 0)
 
     def rotina_manipular(self, p0, p3, Ri, Ac, Bc, Cc):
+
+        if self.modo_juntas:
+            # a deteccao usa enviar_juntas(), que liga o modo juntas e bloqueia movimentos cartesianos; volta ao Home antes
+            self.modo_juntas = False
+
         if not self.ponto_alcancavel(p3 - self.base_offset, self.R_baixo):
             print("Objeto não alcançavel")
             return
         else:
+            self.serial.send("M97 B60 T0.2")
             p3 -= self.base_offset
-            x, y, z = bz.calculo_pontos(p0, p3, Ri, self.R_baixo)
+            p3_apr = p3 + np.array([0, 0, 100])
+            x, y, z = bz.calculo_pontos(p0, p3_apr, Ri, self.R_baixo, recuar_inicio=False)
             A, B, C = self.interpolar_abc(Ri, p0, self.R_baixo, p3, 21, Ac, Bc, Cc)
             self._mover_e_aguardar(x, y, z, A, B, C)
-            self.P0 = p3
+            x, y, z = bz.calculo_linear(p3_apr, p3, self.R_baixo)
+            A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
+            self._mover_e_aguardar(x, y, z, A, B, C)
+            self.serial.send("M97 B0 T0.2")
+            time.sleep(1)
+            x, y, z = bz.calculo_linear(p3, p3_apr, self.R_baixo)
+            self._mover_e_aguardar(x, y, z, A, B, C)
+            self.P0 = p3_apr
             self.Ri = self.R_baixo
             x, y, z = self.home()
-            time.sleep(15)
             self.serial.send("M97 B60 T0.2")

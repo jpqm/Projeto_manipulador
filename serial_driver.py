@@ -33,6 +33,21 @@ class SerialDriver:
             if response == 'ok':
                 break
 
+    def wait_idle(self, intervalo=0.1):
+        """Consulta o status ('?') até o GRBL reportar Idle.
+        Retorna False se não vier relatório de status ou o estado for inesperado (Alarm, Door...)."""
+        while True:
+            time.sleep(intervalo)  # ponytail: atraso fixo cobre a corrida 'ok' -> início do ciclo; aumentar se ler Idle cedo demais
+            self.ser.write(b"?")   # comando em tempo real: sem '\n', senão o GRBL responde um 'ok' extra
+            linha = self.ser.readline().decode(errors="ignore").strip()
+            while linha and not linha.startswith("<"):  # descarta [MSG:...] e afins
+                linha = self.ser.readline().decode(errors="ignore").strip()
+            if linha.startswith("<Idle"):
+                return True
+            if not linha.startswith(("<Run", "<Jog", "<Hold", "<Home")):
+                print(f"[SerialDriver] Status inesperado: {linha!r}")
+                return False
+
     def send_settings(self):
         """Envia os parâmetros de configuração ($) do GRBL para a placa."""
         for key, value in GRBL_SETTINGS.items():
