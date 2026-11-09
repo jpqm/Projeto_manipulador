@@ -22,7 +22,7 @@ CAMERA_TICK_MS = 30
 
 CALIB = Path(__file__).parent / "calibracao"
 POSE_BUSCA = (-110, 0, -20, 0, -105, 0)
-ALTURA_MM = {"Tampa-porca": 10.0, "base": 30.0, "sensor": 25.0}  # medir com paquímetro
+ALTURA_MM = {"Tampa-porca": 10.0, "base": 40.0, "sensor": 25.0}  # medir com paquímetro
 
 
 class CameraCanvas(QLabel):
@@ -45,6 +45,9 @@ class CameraCanvas(QLabel):
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self._cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         self._cap.set(cv2.CAP_PROP_FOCUS, 5)  # escala do DSHOW pode diferir do V4L2: ajuste até a mesa ficar nítida
+        self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # DSHOW: 0.25 = manual
+        self._cap.set(cv2.CAP_PROP_EXPOSURE, -5)         # calibre: abaixe até o papel ficar em ~200-230 no cinza, sem chegar a 255
+        self._cap.set(cv2.CAP_PROP_GAIN, 0)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._grab)
@@ -316,16 +319,16 @@ class RobotGUI(QMainWindow):
             self.log_text.append("Nenhum objeto detectado")
             return
         for d in detections:
-            h = ALTURA_MM.get(d["class"], 10.0)
             if "phys_center" not in d:
                 continue
-            p = np.array([d["phys_center"][0]+15, d["phys_center"][1], 0.0])
+            p = np.array([*d["phys_center"], 0])
             ok = self.controller.ponto_alcancavel(p - self.controller.base_offset)
             if ok:
-                self.alvos.append((d["confidence"], p))
+                self.alvos.append((d["confidence"], p, d.get("angle", 0.0)))
             msg = f"Detectado: {d['class']} ({d['confidence']:.2f}) -> X={p[0]:.1f} Y={p[1]:.1f} Z={p[2]:.1f}" + ("" if ok else " [FORA DE ALCANCE]")
             self.log_text.append(msg)
             print(msg)
+        self.alvos.sort(key=lambda a: a[0], reverse=True)
         self.set_status(f"{len(detections)} objeto(s) detectado(s)")
 
     def _on_detection_error(self, message):
@@ -345,25 +348,16 @@ class RobotGUI(QMainWindow):
             self.set_status("Nenhum objeto alcançável: rode Reconhecer")
             return
         Rc, Pc = ik.cinematica_direta(*POSE_BUSCA)
-        Po = max(self.alvos, key=lambda a: a[0])[1].copy()  # copy: rotina_manipular altera p3 in-place
-        P3 = Po - self.controller.base_offset
-
-        # mesma curva que rotina_manipular envia (pontos do punho, referencial da base)
-        # x, y, z = bz.calculo_pontos(Pc, P3, Rc, self.controller.R_baixo)
-        # ax = plt.figure("Trajetória - Manipular").add_subplot(projection="3d")
-        # ax.plot(x, y, z, "b.-", label="Trajetória (punho)")
-        # ax.scatter(*Pc, color="green", s=60, label="Início")
-        # ax.scatter(*P3, color="red", marker="*", s=120, label="Objeto")
-        # ax.set_xlabel("X (mm)")
-        # ax.set_ylabel("Y (mm)")
-        # ax.set_zlabel("Z (mm)")
-        # ax.legend()
-        # plt.show(block=False)
+        alvos = list(self.alvos)
 
         def _disparar():
             self.update_status.emit("Manipulando...")
             try:
-                self.controller.rotina_manipular(Pc, Po, Rc, 0, -105, 0)
+                for i, (_, Po, angulo_alvo) in enumerate(alvos):
+                    p0, Ri = (Pc, Rc) if i == 0 else (self.controller.P0, self.controller.Ri)
+                    abc = (0, -105, 0) if i == 0 else (None, None, None)
+                    self.controller.rotina_manipular(p0, Po.copy(), Ri, *abc, angulo=angulo_alvo)
+                self.controller.home()
                 self.update_status.emit("Manipulação concluída!")
             finally:
                 self.em_movimento.clear()

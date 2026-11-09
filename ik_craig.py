@@ -3,14 +3,16 @@ import numpy as np
 import roboticstoolbox as rtb
 
 a1_1 = 0
-a2_1 = 20.3563
+a2_1 = 20.3560
 a3_1 = 261.01
 a4_1 = 21.7052
 d1 = 287.628
 d2 = 0
 d3 = 0
-d4 = 264.193
-de = 118.815
+d4 = 264.184
+
+de = 118.824
+
 alpha1_1 = 0
 alpha2_1 = -90
 alpha3_1 = 0
@@ -136,14 +138,11 @@ def calculo_angulos_abc(R, P, compensar_de=True):
     theta5 = np.round(np.rad2deg(theta5), 2)
     theta6 = np.round(np.rad2deg(theta6), 2)
 
-    if abs(theta4) == 180 and abs(theta6) == 180:
+    if abs(theta4) == 180:
         theta4 = 0
-        theta6 = 0
         theta5 = -theta5
-    elif abs(theta4) == 180:
-        theta4 = 0
-        theta5 = theta5 - 90
-    elif abs(theta6) == 180:
+        theta6 = np.round((theta6 % 360) - 180, 2)
+    if abs(theta6) == 180:
         theta6 = 0
 
     theta5 = -theta5

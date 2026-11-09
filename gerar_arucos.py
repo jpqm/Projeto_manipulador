@@ -5,10 +5,12 @@ from PIL import Image
 canvas = np.ones((3508, 2480), dtype=np.uint8) * 255
 d = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 
-px, py = (2480 - 1600) // 3, (3508 - 1600) // 3
-for i in range(4):
-    y, x = py + (i // 2) * (800 + py), px + (i % 2) * (800 + px)
-    canvas[y:y+800, x:x+800] = cv2.aruco.generateImageMarker(d, i, 800)
+y = 150
+for mm in [20, 25, 30]:
+    s = round(mm * 300 / 25.4)
+    for i in range(5):  # IDs 4..8; vão de 120 px (~10 mm) para 5 caberem no A4 com o de 30 mm
+        canvas[y:y+s, 100+i*(s+120):100+i*(s+120)+s] = cv2.aruco.generateImageMarker(d, 4 + i, s)
+    y += s + 300
 
 Image.fromarray(canvas).save("arucos_a4.pdf", resolution=300.0)
 

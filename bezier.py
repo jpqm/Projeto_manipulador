@@ -3,7 +3,7 @@ import numpy as np
 from ik_craig import de
 
 
-def calculo_pontos(P0, P3, Ri, Rf, num_pontos=21, recuar_inicio=True):
+def calculo_pontos(P0, P3, Ri, Rf, num_pontos=21, recuar_inicio=True, recuar_final=True):
     # """Gera 21 pontos de uma curva Bézier cúbica entre P0 e P3, com as orientações Ri/Rf."""
     # P0w = P0 - de*Ri[:, -1]
     # P3w = P3 - de*Rf[:, -1]
@@ -52,7 +52,7 @@ def calculo_pontos(P0, P3, Ri, Rf, num_pontos=21, recuar_inicio=True):
     P1 = (P0w - k * vetor_aprox_i) if recuar_inicio else P0w
 
     # Generalização: recua P2 na direção oposta ao vetor Z final
-    P2 = P3w - k * vetor_aprox_f
+    P2 = (P3w - k * vetor_aprox_f) if recuar_final else P3w
 
     # Cálculo da Bézier
     t = np.linspace(0, 1, num_pontos)[:, None]

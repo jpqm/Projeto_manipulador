@@ -7,6 +7,8 @@
 *.sln
 *.slnx
 *.csproj
+*.pdf
+*.jpg
 
 /.vs/
 /.vscode/
@@ -18,3 +20,4 @@
 /gcode_log.txt
 /capturas/
 test_self_check.py
+workspace_voxel.npz

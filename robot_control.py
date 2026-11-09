@@ -44,7 +44,7 @@ class RobotController:
         self.Ri = np.array([[0, 0, 1], 
                             [0, -1, 0], 
                             [1, 0, 0]])
-        self.base_offset = np.array([-137, 645, 25])
+        self.base_offset = np.array([-137, 645, 26])
         self.modo_juntas = False
         self.R_baixo = np.array([[ 0,  -1,  0], 
                                  [ -1, 0,  0], 
@@ -68,9 +68,11 @@ class RobotController:
             theta1, theta2, theta3 = ik.calculo_angulos(x[i], y[i], z[i])
             angulos.append([theta1, theta2, theta3, A[i], -C[i], B[i]])
 
+        tempo_s = self.calcular_tempo_trajetoria(x, y, z, feedrate)
         for i in range(len(angulos)):
             theta1, theta2, theta3, A_grbl, B_grbl, C_grbl = angulos[i]
-            self.unity.send_angles(theta1, theta2, -theta3, -A[i], B[i], -C[i], feedrate)
+            dur = tempo_s[i - 1] if i > 0 else 0.02
+            self.unity.send_angles(theta1, theta2, -theta3, -A[i], B[i], -C[i], dur)
             self.serial.send(f"G1 X{theta1} Y{theta2} Z{theta3} A{A_grbl} B{B_grbl} C{C_grbl} F{feedrate}")
 
     def ponto_alcancavel(self, ponto, R=None):
@@ -94,21 +96,14 @@ class RobotController:
         self.serial.send(f"G1 X{j1} Y{j2} Z{j3} A{j4} B{j6} C{j5} F800")
         self.unity.send_angles(j1, j2, -j3, -j4, j5, j6, 800)
 
-    def calcular_tempo_trajetoria(self, x, y, z, theta4, theta5, theta6, feedrate=800, fator_seg=1.1):
+    def calcular_tempo_trajetoria(self, x, y, z, feedrate=800):
         """Estima o tempo (s) da trajetória pela distância percorrida em cada segmento dividida pelo feedrate."""
-        angulos = []
-        for i in range(21):
-            t1, t2, t3 = ik.calculo_angulos(x[i], y[i], z[i])
-            angulos.append([t1, t2, t3, theta4[i], theta5[i], theta6[i]])
-
-        angulos = np.array(angulos)
-        deltas = np.diff(angulos, axis=0)                              # (20, 6)
-        distancia_total = np.sum(np.sqrt(np.sum(deltas**2, axis=1)))   # norma euclidiana por segmento, somada
-
-        tempo_min = distancia_total / feedrate     # F do GRBL é sempre unidades/min
-        tempo_s = tempo_min * 60 * fator_seg
-
-        print(f"[TRAJETÓRIA] Tempo estimado: {tempo_s:.1f} s")
+        tempo_s = np.zeros(len(x)-1)
+        for i in range(1, len(x)):
+            dx = x[i] - x[i-1]
+            dy = y[i] - y[i-1]
+            dz = z[i] - z[i-1]
+            tempo_s[i-1] = (np.sqrt(np.pow(dx, 2) + np.pow(dy, 2) + np.pow(dz, 2)) / feedrate)*60
         return tempo_s
 
     def _mover_e_aguardar(self, x, y, z, A, B, C, feedrate=800):
@@ -138,7 +133,7 @@ class RobotController:
                        [0, -1, 0], 
                        [1, 0, 0]])
         
-        x1, y1, z1 = bz.calculo_pontos(self.P0, P3, self.Ri, Rf)
+        x1, y1, z1 = bz.calculo_pontos(self.P0, P3, self.Ri, Rf, recuar_final=False)
         A1, B1, C1 = self.interpolar_abc(self.Ri, self.P0, Rf, P3, 21)
         
         self.executar_movimento(x1, y1, z1, A1, B1, C1)
@@ -184,7 +179,7 @@ class RobotController:
             return
 
         b = self.base_offset
-        P_lapis = np.array([-300, 210, 0]) - b
+        P_lapis = np.array([-305, 210, 0]) - b
         P_apr_lapis = P_lapis + np.array([0, 0, 100])
 
         if self.ponto_alcancavel(P_lapis):
@@ -313,30 +308,56 @@ class RobotController:
             json.dump(poses_salvas, f, indent=4)
         self.enviar_juntas(0, 0, 0, 0, 0, 0)
 
-    def rotina_manipular(self, p0, p3, Ri, Ac, Bc, Cc):
+    def rotina_manipular(self, p0, p3, Ri, Ac, Bc, Cc, angulo=0.0):
 
         if self.modo_juntas:
-            # a deteccao usa enviar_juntas(), que liga o modo juntas e bloqueia movimentos cartesianos; volta ao Home antes
             self.modo_juntas = False
 
-        if not self.ponto_alcancavel(p3 - self.base_offset, self.R_baixo):
+        p3 = p3 - self.base_offset
+        if not self.ponto_alcancavel(p3, self.R_baixo):
             print("Objeto não alcançavel")
             return
-        else:
-            self.serial.send("M97 B60 T0.2")
-            p3 -= self.base_offset
-            p3_apr = p3 + np.array([0, 0, 100])
-            x, y, z = bz.calculo_pontos(p0, p3_apr, Ri, self.R_baixo, recuar_inicio=False)
-            A, B, C = self.interpolar_abc(Ri, p0, self.R_baixo, p3, 21, Ac, Bc, Cc)
-            self._mover_e_aguardar(x, y, z, A, B, C)
-            x, y, z = bz.calculo_linear(p3_apr, p3, self.R_baixo)
-            A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
-            self._mover_e_aguardar(x, y, z, A, B, C)
-            self.serial.send("M97 B0 T0.2")
-            time.sleep(1)
-            x, y, z = bz.calculo_linear(p3, p3_apr, self.R_baixo)
-            self._mover_e_aguardar(x, y, z, A, B, C)
-            self.P0 = p3_apr
-            self.Ri = self.R_baixo
-            x, y, z = self.home()
-            self.serial.send("M97 B60 T0.2")
+
+        rad = np.radians(angulo)
+        Rz = np.array([
+            [np.cos(rad), -np.sin(rad), 0],
+            [np.sin(rad),  np.cos(rad), 0],
+            [0,            0,           1]
+        ])
+        self.R_pega = Rz @ self.R_baixo
+        p3_apr = p3 + np.array([0, 0, 100])
+        p_dest = np.array([-321.0, 205.0, 55.0]) - self.base_offset
+        p_dest_apr = p_dest + np.array([0, 0, 100])
+
+        # 1. Aproximar, descer, pegar e subir
+        self.serial.send("M97 B60 T0.2")
+        x, y, z = bz.calculo_pontos(p0, p3_apr, Ri, self.R_pega, recuar_inicio=(Ac is None))
+        A, B, C = self.interpolar_abc(Ri, p0, self.R_pega, p3, 21, Ac, Bc, Cc)
+        self._mover_e_aguardar(x, y, z, A, B, C)
+
+        x, y, z = bz.calculo_linear(p3_apr, p3, self.R_pega)
+        A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
+        self._mover_e_aguardar(x, y, z, A, B, C)
+        self.serial.send("M97 B0 T0.2")
+        time.sleep(1)
+
+        x, y, z = bz.calculo_linear(p3, p3_apr, self.R_pega)
+        self._mover_e_aguardar(x, y, z, A, B, C)
+
+        # 2. Levar até (-323, 202, 50), soltar e recuar
+        # x, y, z = bz.calculo_pontos(p3_apr, p_dest_apr, self.R_pega, self.R_baixo)
+        # A, B, C = self.interpolar_abc(self.R_pega, p3_apr, self.R_baixo, p_dest, 21, A[-1], B[-1], C[-1])
+        # self._mover_e_aguardar(x, y, z, A, B, C)
+
+        # x, y, z = bz.calculo_linear(p_dest_apr, p_dest, self.R_baixo)
+        # A, B, C = np.full(21, A[-1]), np.full(21, B[-1]), np.full(21, C[-1])
+        # self._mover_e_aguardar(x, y, z, A, B, C)
+        # self.serial.send("M97 B60 T0.2")
+        # time.sleep(1)
+
+        # x, y, z = bz.calculo_linear(p_dest, p_dest_apr, self.R_baixo)
+        # self._mover_e_aguardar(x, y, z, A, B, C)
+
+        # self.P0 = p_dest_apr
+        self.P0 = p3_apr
+        self.Ri = self.R_baixo

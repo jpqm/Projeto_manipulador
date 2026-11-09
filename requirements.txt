@@ -1,3 +1,9 @@
 PyQt6==6.11.0
 pyserial==3.5
-ultralytics
+ultralytics==8.4.121
+roboticstoolbox-python==1.4.4
+numpy==2.5.2
+opencv-python==5.0.0.93
+matplotlib==3.11.1
+scipy==1.18.1
+pillow==12.3.0

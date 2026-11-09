@@ -285,14 +285,10 @@ public class UnityRobotReceiver : MonoBehaviour
                     sumSquares += delta * delta;
                 }
 
-                float totalDistance = Mathf.Sqrt(sumSquares);
-                float feedrate = waypoint.Length > 6 ? waypoint[6] : -1f;
-
-                if (feedrate > 0f)
+                float duration = waypoint.Length > 6 ? waypoint[6] : -1f;
+                if (duration > 0f)
                 {
-                    segmentDuration = totalDistance > 0.001f
-                        ? Mathf.Max((totalDistance / feedrate) * 60f, 0.02f)
-                        : 0.02f;
+                    segmentDuration = Mathf.Max(duration, 0.02f);
                 }
                 else
                 {
